@@ -38,6 +38,7 @@ void main() async {
   await _getStoragePermission();
   runApp(const MyApp());
 }
+
 const Color _kBackgroundColor = Color(0xffa0a0a0);
 
 class MyApp extends StatelessWidget {
@@ -50,6 +51,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.green,
       ),
+      debugShowCheckedModeBanner: false,
       home: const ImageColors(title: 'Image Colors'),
     );
   }
@@ -70,11 +72,12 @@ class _ImageColorsState extends State<ImageColors> {
   bool _showSlider = false;
   File? _image;
   double _circleRadius = 50.0;
-  Offset _circleCenter = Offset.zero;
+  Offset _circleCenter = const ui.Offset(100, 100);
   final GlobalKey _imageKey = GlobalKey();
   final ImagePicker _picker = ImagePicker();
   img.Image? _loadedImage;
   bool permissionGranted = false;
+  // double _scale = 1.0; // Add scale for zooming
 
   @override
   void initState() {
@@ -102,10 +105,27 @@ class _ImageColorsState extends State<ImageColors> {
     try {
       final bytes = await image.readAsBytes();
       final img.Image? loadedImage = img.decodeImage(Uint8List.fromList(bytes));
+
+      final height = loadedImage!.height;
+      final width = loadedImage.width;
+
       if (loadedImage != null) {
         setState(() {
-          _image = image;
-          _loadedImage = loadedImage;
+          if (height >= width) {
+            _image = image;
+            _loadedImage = loadedImage;
+          } else {
+            final img.Image rotatedImage =
+                img.copyRotate(loadedImage, angle: 90);
+
+            final Uint8List rotatedBytes =
+                Uint8List.fromList(img.encodeJpg(rotatedImage));
+            File rotatedFile = File(image.path);
+            rotatedFile.writeAsBytes(rotatedBytes);
+
+            _image = rotatedFile;
+            _loadedImage = rotatedImage;
+          }
         });
       } else {
         showDialog(
@@ -131,6 +151,15 @@ class _ImageColorsState extends State<ImageColors> {
     } catch (e) {
       print("Error loading image: $e");
     }
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    setState(() {
+      final RenderBox box =
+          _imageKey.currentContext?.findRenderObject() as RenderBox;
+      final Offset localPosition = box.globalToLocal(details.globalPosition);
+      _circleCenter = localPosition;
+    });
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -166,16 +195,18 @@ class _ImageColorsState extends State<ImageColors> {
 
     final int width = _loadedImage!.width;
     final int height = _loadedImage!.height;
-    final centerX =
-        (_circleCenter.dx * width / _imageKey.currentContext!.size!.width)
-            .round();
-    final centerY =
-        (_circleCenter.dy * height / _imageKey.currentContext!.size!.height)
-            .round();
+    final centerX = ((_circleCenter.dx - _circleRadius - 30) *
+            width /
+            _imageKey.currentContext!.size!.width)
+        .round();
+    final centerY = ((_circleCenter.dy - _circleRadius - 30) *
+            height /
+            _imageKey.currentContext!.size!.height)
+        .round();
     final radius =
         (_circleRadius * width / _imageKey.currentContext!.size!.width).round();
 
-    int rTotal = 0, gTotal = 0, bTotal = 0, count = 0;
+    double rTotal = 0, gTotal = 0, bTotal = 0, count = 0;
 
     for (int y = -radius; y <= radius; y++) {
       for (int x = -radius; x <= radius; x++) {
@@ -193,9 +224,9 @@ class _ImageColorsState extends State<ImageColors> {
       }
     }
 
-    final averageR = (rTotal / count).round();
-    final averageG = (gTotal / count).round();
-    final averageB = (bTotal / count).round();
+    final averageR = (rTotal / count);
+    final averageG = (gTotal / count);
+    final averageB = (bTotal / count);
 
     print("R: $averageR, G: $averageG, B: $averageB");
     _textFieldInputNameController.clear();
@@ -203,7 +234,8 @@ class _ImageColorsState extends State<ImageColors> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('R: $averageR, G: $averageG, B: $averageB'),
+          title: Text(
+              'R: ${averageB.toStringAsFixed(2)}, G: ${averageB.toStringAsFixed(2)}, B: ${averageG.toStringAsFixed(2)}'),
           content: TextField(
             onChanged: (value) {},
             controller: _textFieldInputNameController,
@@ -232,20 +264,35 @@ class _ImageColorsState extends State<ImageColors> {
                 String formattedDate = dateFormat.format(now);
                 DateFormat timeFormat = DateFormat.Hms();
                 String formattedTime = timeFormat.format(now);
-
+                String safeSheetName =
+                    formattedDate.replaceAll(RegExp(r'[\/:*?"<>|]'), '_');
                 String filePath = '$documentsPath/average_color.xlsx';
                 final xl.Excel excel;
                 final xl.Sheet sheetObject;
 
                 if (File(filePath).existsSync()) {
-                  print("file already exist");
+                  print("File already exists");
                   var bytes = File(filePath).readAsBytesSync();
                   excel = xl.Excel.decodeBytes(bytes);
-                  sheetObject = excel[formattedDate];
+
+                  // Ensure sheet exists before using it
+                  if (excel.sheets.containsKey(safeSheetName)) {
+                    sheetObject = excel[safeSheetName];
+                  } else {
+                    sheetObject = excel[safeSheetName];
+                    sheetObject.appendRow([
+                      xl.TextCellValue('Name'),
+                      xl.TextCellValue('Date'),
+                      xl.TextCellValue('Time'),
+                      xl.TextCellValue('Red'),
+                      xl.TextCellValue('Green'),
+                      xl.TextCellValue('Blue')
+                    ]);
+                  }
                 } else {
-                  print("no file found");
+                  print("No file found");
                   excel = xl.Excel.createExcel();
-                  sheetObject = excel[formattedDate];
+                  sheetObject = excel[safeSheetName];
 
                   // Add column headers if file does not exist
                   sheetObject.appendRow([
@@ -263,9 +310,9 @@ class _ImageColorsState extends State<ImageColors> {
                   xl.TextCellValue(_textFieldInputNameController.text),
                   xl.TextCellValue(formattedDate),
                   xl.TextCellValue(formattedTime),
-                  xl.TextCellValue(averageR.toString()),
-                  xl.TextCellValue(averageG.toString()),
-                  xl.TextCellValue(averageB.toString())
+                  xl.TextCellValue(averageR.toStringAsFixed(2)),
+                  xl.TextCellValue(averageG.toStringAsFixed(2)),
+                  xl.TextCellValue(averageB.toStringAsFixed(2)),
                 ]);
 
                 var fileBytes = excel.encode();
@@ -295,11 +342,11 @@ class _ImageColorsState extends State<ImageColors> {
         title: Text(widget.title ?? ''),
         actions: [
           IconButton(
-              onPressed: _getImageFromCamera, icon: const Icon(Icons.camera)),
+              onPressed: _getImageFromCamera,
+              icon: const Icon(Icons.camera_alt)),
           const SizedBox(width: 5),
           IconButton(
-              onPressed: _getImageFromGallery,
-              icon: const Icon(Icons.image_search_outlined)),
+              onPressed: _getImageFromGallery, icon: const Icon(Icons.image)),
           const SizedBox(width: 5),
           TextButton.icon(
             onPressed: () {
@@ -307,8 +354,8 @@ class _ImageColorsState extends State<ImageColors> {
                 _showSlider = !_showSlider;
               });
             },
-            icon: const Icon(Icons.linear_scale_outlined),
-            label: Text("$_circleRadius"),
+            icon: const Icon(Icons.adjust),
+            label: Text(_circleRadius.toStringAsFixed(0)),
           ),
           const SizedBox(width: 5),
           IconButton(
@@ -324,6 +371,7 @@ class _ImageColorsState extends State<ImageColors> {
           children: [
             Expanded(
               child: GestureDetector(
+                onTapUp: _onTapUp, // Change to handle taps
                 onPanUpdate: _onPanUpdate,
                 onPanEnd: _onPanEnd,
                 child: Stack(
@@ -335,8 +383,12 @@ class _ImageColorsState extends State<ImageColors> {
                         fit: BoxFit.cover,
                       ),
                     Positioned(
-                      left: _circleCenter.dx - _circleRadius,
-                      top: _circleCenter.dy - _circleRadius,
+                      left: (_circleCenter.dx - _circleRadius) -
+                          _circleRadius -
+                          30,
+                      top: (_circleCenter.dy - _circleRadius) -
+                          _circleRadius -
+                          30,
                       child: Container(
                         width: _circleRadius * 2,
                         height: _circleRadius * 2,
@@ -359,9 +411,9 @@ class _ImageColorsState extends State<ImageColors> {
                 children: [
                   Slider(
                     value: _circleRadius,
-                    min: 10.0,
+                    min: 5.0,
                     max: 100.0,
-                    label: _circleRadius.toString(),
+                    label: _circleRadius.toStringAsFixed(0),
                     divisions: 90,
                     onChanged: (value) {
                       setState(() {

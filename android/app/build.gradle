@@ -49,7 +49,7 @@ android {
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
-        setProperty("archivesBaseName", "rgb_circle_" + versionName )
+        setProperty("archivesBaseName", "com.datacorp.android.rgb-v" + versionName )
     }
 
     buildTypes {
